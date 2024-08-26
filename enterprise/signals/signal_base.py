@@ -916,7 +916,10 @@ def SignalCollection(metasignals):  # noqa: C901
             ndiags = [signal.get_ndiag(params) for signal in self._signals]
             return sum(ndiag for ndiag in ndiags if ndiag is not None)
 
-        @cache_call("delay_params")
+        # since this function has side-effects, it can only be cached
+        # with limit=1, so it will run again if called with params different
+        # than the last time
+        @cache_call("delay_params", limit=1)
         def get_delay(self, params):
             delays = [signal.get_delay(params) for signal in self._signals]
             return sum(delay for delay in delays if delay is not None)
