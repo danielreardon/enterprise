@@ -1014,6 +1014,7 @@ def cache_call(attrs, limit=2):
             # get the relevant parameters to be cached
             keys = sum([getattr(self, attr) for attr in attrs], [])
             ret = []
+            ret.append(func.__name__)  # including the function name for speed improvement
             # TODO: this deals with vector parameters but could be cleaner...
             for key in keys:
                 if key in params:
