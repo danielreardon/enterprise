@@ -229,6 +229,7 @@ def FFTBasisGP(
     cutbins=1,
     Tspan=None,
     start_time=None,
+    interpolation_order=1,
     name="red_noise",
 ):
     """Function to return a BasisGP class with a coarse time basis."""
@@ -245,7 +246,9 @@ def FFTBasisGP(
         cutbins = int(np.ceil(oversample / cutoff))
 
     if basis is None:
-        basis = utils.create_fft_time_basis(nknots=nknots, Tspan=Tspan, start_time=start_time)
+        basis = utils.create_fft_time_basis(
+            nknots=nknots, Tspan=Tspan, start_time=start_time, order=interpolation_order
+        )
 
     BaseClass = BasisGP(spectrum, basis, coefficients=coefficients, combine=combine, selection=selection, name=name)
 
@@ -545,6 +548,7 @@ def FFTBasisCommonGP(
     cutoff=None,
     cutbins=1,
     oversample=3,
+    interpolation_order=1,
     name="common_fft",
 ):
     if coefficients and (Tspan is None or start_time is None):
@@ -563,7 +567,7 @@ def FFTBasisCommonGP(
         #                low-frequency cut-off of the PSD
         cutbins = int(np.ceil(oversample / cutoff))
 
-    basis = utils.create_fft_time_basis(nknots=nknots, Tspan=Tspan, start_time=start_time)
+    basis = utils.create_fft_time_basis(nknots=nknots, Tspan=Tspan, start_time=start_time, order=interpolation_order)
     BaseClass = BasisCommonGP(spectrum, basis, orf, coefficients=coefficients, combine=combine, name=name)
 
     class FFTBasisCommonGP(BaseClass):
