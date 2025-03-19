@@ -135,12 +135,22 @@ class BasePulsar(object):
             self._isort = slice(None, None, None)
             self._iisort = slice(None, None, None)
 
-    def filter_data(self, start_time=None, end_time=None):
-        """Filter data to create a time-slice of overall dataset."""
-        if start_time is None and end_time is None:
-            mask = np.ones(self._toas.shape, dtype=bool)
-        else:
-            mask = np.logical_and(self._toas >= start_time * 86400, self._toas <= end_time * 86400)
+    def filter_data(self, mask=None, start_time=None, end_time=None):
+        """
+        Filters the dataset to create a time-slice based on a custom mask and/or a time range.
+
+        Parameters:
+            mask (array-like, optional): Boolean array specifying which data to keep.
+                                         If provided, this mask will be combined (logical AND)
+                                         with the time range filter. Default is None.
+            start_time (float, optional): Start time (MJD) for filtering. If None, the min time in the dataset is used.
+            end_time (float, optional): End time (MJD) for filtering. If None, the max time in the dataset is used.
+        """
+
+        start_time = start_time * 86400 if start_time is not None else np.min(self._toas)
+        end_time = end_time * 86400 if end_time is not None else np.max(self._toas)
+        mask_times = np.logical_and(self._toas >= start_time, self._toas <= end_time)
+        mask = np.logical_and(mask, mask_times) if mask is not None else mask_times
 
         self._toas = self._toas[mask]
         self._toaerrs = self._toaerrs[mask]
@@ -158,7 +168,7 @@ class BasePulsar(object):
                 self._flags[key] = self._flags[key][mask]
 
         if self._planetssb is not None:
-            self._planetssb = self.planetssb[mask, :, :]
+            self._planetssb = self._planetssb[mask, :, :]
 
         self.sort_data()
 
@@ -718,7 +728,7 @@ class FeatherPulsar:
             if attr in meta:
                 setattr(self, attr, meta[attr])
             else:
-                print(f"Pulsar.read_feather: cannot find {attr} in feather file {filename}.")
+                print(f"FeatherPulsar.read_feather: cannot find {attr} in feather file {filename}.")
 
         if "noisedict" in meta:
             setattr(self, "noisedict", meta["noisedict"])
@@ -754,11 +764,11 @@ class FeatherPulsar:
         pydict.update({f"flags_{flag}": self.flags[flag] for flag in self.flags})
 
         meta = {}
-        for attr in Pulsar.metadata:
+        for attr in FeatherPulsar.metadata:
             if hasattr(self, attr):
-                meta[attr] = Pulsar.to_list(getattr(self, attr))
+                meta[attr] = FeatherPulsar.to_list(getattr(self, attr))
             else:
-                print(f"Pulsar.save_feather: cannot find {attr} in Pulsar {self.name}.")
+                print(f"FeatherPulsar.save_feather: cannot find {attr} in Pulsar {self.name}.")
 
         # use attribute if present
         noisedict = getattr(self, "noisedict", None) if noisedict is None else noisedict
