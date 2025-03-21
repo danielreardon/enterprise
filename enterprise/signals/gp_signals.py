@@ -123,7 +123,7 @@ def BasisGP(
                 nctot += nn
 
         @signal_base.cache_call("prior_params")
-        def _construct_phi(self, params):
+        def _construct_prior(self, params):
             for key, slc in self._slices.items():
                 phislc = self._prior[key](self._labels[key], params=params)
                 self._phi = self._phi.set(phislc, slc)
@@ -187,7 +187,7 @@ def BasisGP(
 
             def get_phi(self, params):
                 self._construct_basis(params)
-                self._construct_phi(params)
+                self._construct_prior(params)
 
                 return self._phi
 
@@ -270,7 +270,7 @@ def FFTBasisGP(
         signal_id = name
 
         @signal_base.cache_call("prior_params")
-        def _construct_phi(self, params):
+        def _construct_prior(self, params):
             for key, slc in self._slices.items():
                 t_knots = self._labels[key]
 
@@ -299,7 +299,7 @@ def FFTBasisGP(
 
             def get_phi(self, params):
                 self._construct_basis(params)
-                self._construct_phi(params)
+                self._construct_prior(params)
 
                 return self._phi
 
@@ -442,8 +442,8 @@ def BasisCommonGP(priorFunction, basisFunction, orfFunction, coefficients=False,
             self._basis, self._labels = self._bases(params=params)
 
         @signal_base.cache_call("prior_params")
-        def _construct_prior(self, labels, params):
-            return BasisCommonGP._prior(labels, params=params)
+        def _construct_prior(self, params):
+            return BasisCommonGP._prior(self._labels, params=params)
 
         if coefficients:
 
@@ -494,7 +494,7 @@ def BasisCommonGP(priorFunction, basisFunction, orfFunction, coefficients=False,
 
             def get_phi(self, params):
                 self._construct_basis(params)
-                prior = self._construct_prior(self._labels, params)
+                prior = self._construct_prior(params)
                 orf = BasisCommonGP._orf(self._psrpos, self._psrpos, params=params)
 
                 return prior * orf
@@ -662,7 +662,7 @@ def FFTBasisCommonGP(
                 """Use Phi from signal1, ORF from signal1 vs signal2"""
 
                 phi1 = signal1._construct_prior(params)
-                # phi2 = signal2._construct_phi(params)
+                # phi2 = signal2._construct_prior(params)
 
                 orf = FFTBasisCommonGP._orf(signal1._psrpos, signal2._psrpos, params=params)
 
