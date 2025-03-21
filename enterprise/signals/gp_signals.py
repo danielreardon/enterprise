@@ -83,6 +83,14 @@ def BasisGP(
                     self._params[cpar.name] = cpar
 
         @property
+        def prior_params(self):
+            """Get any varying prior parameters."""
+            ret = []
+            for prior in self._prior.values():
+                ret.extend([pp.name for pp in prior.params])
+            return ret
+
+        @property
         def basis_params(self):
             """Get any varying basis parameters."""
             ret = []
@@ -113,6 +121,12 @@ def BasisGP(
                 self._basis[mask, nctot : nn + nctot] = Fmat
                 self._slices.update({key: slice(nctot, nn + nctot)})
                 nctot += nn
+
+        @signal_base.cache_call("prior_params")
+        def _construct_phi(self, params):
+            for key, slc in self._slices.items():
+                phislc = self._prior[key](self._labels[key], params=params)
+                self._phi = self._phi.set(phislc, slc)
 
         # this class does different things (and gets different method
         # definitions) if the user wants it to model GP coefficients
@@ -173,10 +187,8 @@ def BasisGP(
 
             def get_phi(self, params):
                 self._construct_basis(params)
+                self._construct_phi(params)
 
-                for key, slc in self._slices.items():
-                    phislc = self._prior[key](self._labels[key], params=params)
-                    self._phi = self._phi.set(phislc, slc)
                 return self._phi
 
             def get_phiinv(self, params):
@@ -257,6 +269,29 @@ def FFTBasisGP(
         signal_name = "red noise"
         signal_id = name
 
+        @signal_base.cache_call("prior_params")
+        def _construct_phi(self, params):
+            for key, slc in self._slices.items():
+                t_knots = self._labels[key]
+
+                freqs = utils.knots_to_freqs(t_knots, oversample=oversample)
+
+                # Hack, because Enterprise adds in f=0 and then calculates df,
+                # meaning we cannot simply start freqs from 0. Thus, we use
+                # a modified frequency spacing, such that:
+                # [0, f1, 0, f1, f2, f3] => [df, -df, df, df, df]
+                if cutbins == 0:
+                    freqs_prior = np.concatenate([[freqs[1]], freqs])
+                    psd_prior = self._prior[key](freqs_prior, params=params, components=1)
+                    psd = np.concatenate([[-psd_prior[1]], psd_prior[2:]])
+
+                else:
+                    psd_prior = self._prior[key](freqs[1:], params=params, components=1)
+                    psd = np.concatenate([np.zeros(cutbins), psd_prior[cutbins - 1 :]])
+
+                phislc = utils.psd2cov(t_knots, psd)
+                self._phi = self._phi.set(phislc, slc)
+
         if coefficients:
             raise NotImplementedError("Coefficients not supported for FFTBasisGP")
 
@@ -264,27 +299,7 @@ def FFTBasisGP(
 
             def get_phi(self, params):
                 self._construct_basis(params)
-
-                for key, slc in self._slices.items():
-                    t_knots = self._labels[key]
-
-                    freqs = utils.knots_to_freqs(t_knots, oversample=oversample)
-
-                    # Hack, because Enterprise adds in f=0 and then calculates df,
-                    # meaning we cannot simply start freqs from 0. Thus, we use
-                    # a modified frequency spacing, such that:
-                    # [0, f1, 0, f1, f2, f3] => [df, -df, df, df, df]
-                    if cutbins == 0:
-                        freqs_prior = np.concatenate([[freqs[1]], freqs])
-                        psd_prior = self._prior[key](freqs_prior, params=params, components=1)
-                        psd = np.concatenate([[-psd_prior[1]], psd_prior[2:]])
-
-                    else:
-                        psd_prior = self._prior[key](freqs[1:], params=params, components=1)
-                        psd = np.concatenate([np.zeros(cutbins), psd_prior[cutbins - 1 :]])
-
-                    phislc = utils.psd2cov(t_knots, psd)
-                    self._phi = self._phi.set(phislc, slc)
+                self._construct_phi(params)
 
                 return self._phi
 
@@ -410,6 +425,11 @@ def BasisCommonGP(priorFunction, basisFunction, orfFunction, coefficients=False,
                 self._params[cpar.name] = cpar
 
         @property
+        def prior_params(self):
+            """Get any varying prior parameters."""
+            return [pp.name for pp in self._prior.params]
+
+        @property
         def basis_params(self):
             """Get any varying basis parameters."""
             return [pp.name for pp in self._bases.params]
@@ -420,6 +440,10 @@ def BasisCommonGP(priorFunction, basisFunction, orfFunction, coefficients=False,
         @signal_base.cache_call("basis_params", limit=1)
         def _construct_basis(self, params={}):
             self._basis, self._labels = self._bases(params=params)
+
+        @signal_base.cache_call("prior_params")
+        def _construct_prior(self, labels, params):
+            return BasisCommonGP._prior(labels, params=params)
 
         if coefficients:
 
@@ -470,8 +494,7 @@ def BasisCommonGP(priorFunction, basisFunction, orfFunction, coefficients=False,
 
             def get_phi(self, params):
                 self._construct_basis(params)
-
-                prior = BasisCommonGP._prior(self._labels, params=params)
+                prior = self._construct_prior(self._labels, params)
                 orf = BasisCommonGP._orf(self._psrpos, self._psrpos, params=params)
 
                 return prior * orf
@@ -599,35 +622,36 @@ def FFTBasisCommonGP(
             freqs = utils.knots_to_freqs(self._t_knots, oversample=oversample)
             self._freqs = freqs
 
+        @signal_base.cache_call("prior_params")
+        def _construct_prior(self, params):
+            """
+            Compute and cache the time-domain covariance ('phi') for *this* signal's basis.
+            """
+
+            # Hack, because Enterprise adds in f=0 and then calculates df,
+            # meaning we cannot simply start freqs from 0. Thus, we use
+            # a modified frequency spacing, such that:
+            # [0, f1, 0, f1, f2, f3] => [df, -df, df, df, df]
+            if cutbins == 0:
+                freqs_prior = np.concatenate([[self._freqs[1]], self._freqs])
+                psd_prior = FFTBasisCommonGP._prior(freqs_prior, params=params, components=1)
+                psd = np.concatenate([[-psd_prior[1]], psd_prior[2:]])
+
+            else:
+                psd_prior = FFTBasisCommonGP._prior(self._freqs[1:], params=params, components=1)
+                psd = np.concatenate([np.zeros(cutbins), psd_prior[cutbins - 1 :]])
+
+            return utils.psd2cov(self._t_knots, psd)
+
         if coefficients:
             raise NotImplementedError("Coefficients not supported for FFTBasisCommonGP")
 
         else:
-            # @signal_base.cache_call("basis_params", limit=1)
-            def get_phi_matrix(self, params):
-                """
-                Compute and cache the time-domain covariance ('phi') for *this* signal's basis.
-                """
-
-                # Hack, because Enterprise adds in f=0 and then calculates df,
-                # meaning we cannot simply start freqs from 0. Thus, we use
-                # a modified frequency spacing, such that:
-                # [0, f1, 0, f1, f2, f3] => [df, -df, df, df, df]
-                if cutbins == 0:
-                    freqs_prior = np.concatenate([[self._freqs[1]], self._freqs])
-                    psd_prior = FFTBasisCommonGP._prior(freqs_prior, params=params, components=1)
-                    psd = np.concatenate([[-psd_prior[1]], psd_prior[2:]])
-
-                else:
-                    psd_prior = FFTBasisCommonGP._prior(self._freqs[1:], params=params, components=1)
-                    psd = np.concatenate([np.zeros(cutbins), psd_prior[cutbins - 1 :]])
-
-                return utils.psd2cov(self._t_knots, psd)
 
             def get_phi(self, params):
                 """Over-load constructing Phi to deal with the FFT"""
                 self._construct_basis(params)
-                phi = self.get_phi_matrix(params)
+                phi = self._construct_prior(params)
 
                 orf = FFTBasisCommonGP._orf(self._psrpos, self._psrpos, params=params)
 
@@ -637,8 +661,8 @@ def FFTBasisCommonGP(
             def get_phicross(cls, signal1, signal2, params):
                 """Use Phi from signal1, ORF from signal1 vs signal2"""
 
-                phi1 = signal1.get_phi_matrix(params)
-                # phi2 = signal2.get_phi_matrix(params)
+                phi1 = signal1._construct_prior(params)
+                # phi2 = signal2._construct_phi(params)
 
                 orf = FFTBasisCommonGP._orf(signal1._psrpos, signal2._psrpos, params=params)
 
