@@ -237,6 +237,7 @@ def FFTBasisGP(
     nknots=None,
     selection=Selection(selections.no_selection),
     oversample=3,
+    fmax_factor=1,
     cutoff=None,
     cutbins=1,
     Tspan=None,
@@ -257,6 +258,8 @@ def FFTBasisGP(
         #                low-frequency cut-off of the PSD
         cutbins = int(np.ceil(oversample / cutoff))
 
+    fmax_factor = int(fmax_factor) if fmax_factor >= 1 else 1
+
     if basis is None:
         basis = utils.create_fft_time_basis(
             nknots=nknots, Tspan=Tspan, start_time=start_time, order=interpolation_order
@@ -274,7 +277,7 @@ def FFTBasisGP(
             for key, slc in self._slices.items():
                 t_knots = self._labels[key]
 
-                freqs = utils.knots_to_freqs(t_knots, oversample=oversample)
+                freqs = utils.knots_to_freqs(t_knots, oversample=oversample, fmax_factor=fmax_factor)
 
                 # Hack, because Enterprise adds in f=0 and then calculates df,
                 # meaning we cannot simply start freqs from 0. Thus, we use
@@ -289,7 +292,7 @@ def FFTBasisGP(
                     psd_prior = self._prior[key](freqs[1:], params=params, components=1)
                     psd = np.concatenate([np.zeros(cutbins), psd_prior[cutbins - 1 :]])
 
-                phislc = utils.psd2cov(t_knots, psd)
+                phislc = utils.psd2cov(t_knots, psd, fmax_factor=fmax_factor)
                 self._phi = self._phi.set(phislc, slc)
 
         if coefficients:
@@ -571,6 +574,7 @@ def FFTBasisCommonGP(
     cutoff=None,
     cutbins=1,
     oversample=3,
+    fmax_factor=1,
     interpolation_order=1,
     name="common_fft",
 ):
@@ -589,6 +593,8 @@ def FFTBasisCommonGP(
         # :param cutoff: frequency 1 / (cutoff * T) at which to do
         #                low-frequency cut-off of the PSD
         cutbins = int(np.ceil(oversample / cutoff))
+
+    fmax_factor = int(fmax_factor) if fmax_factor >= 1 else 1
 
     basis = utils.create_fft_time_basis(nknots=nknots, Tspan=Tspan, start_time=start_time, order=interpolation_order)
     BaseClass = BasisCommonGP(spectrum, basis, orf, coefficients=coefficients, combine=combine, name=name)
@@ -619,7 +625,7 @@ def FFTBasisCommonGP(
             self._basis, self._labels = self._bases(params=params, Tspan=span, start_time=start)
 
             self._t_knots = self._labels
-            freqs = utils.knots_to_freqs(self._t_knots, oversample=oversample)
+            freqs = utils.knots_to_freqs(self._t_knots, oversample=oversample, fmax_factor=fmax_factor)
             self._freqs = freqs
 
         @signal_base.cache_call("prior_params")

@@ -842,18 +842,16 @@ def linear_interp_basis(toas, dt=30 * 86400):
     return M[:, idx], x[idx]
 
 
-def psd2cov(
-    t_knots,
-    psd,
-):
+def psd2cov(t_knots, psd, fmax_factor=1):
     """
-    Convert a power spectral density function, defined by (freqs, psd), to a covariance matrix
+    Convert a power spectral density function, defined by (freqs, psd), to a covariance matrix.
 
-    :param t_knots: Timestamps of the coarse time grid
-    :param psd: values of the PSD at frequencies freqs (assumes *delta_f in psd)
-                so psd is assumed to be in units of [s^2]
+    :param t_knots: Timestamps of the coarse time grid.
+    :param psd: PSD values evaluated at frequencies from knots_to_freqs
+                (assumes *delta_f in psd, so units of [s^2]).
+    :param fmax_factor: Integer factor to scale up fmax.
 
-    :return covmat: Covariance matrix at coarse time grid
+    :return covmat: Covariance matrix at the coarse time grid.
     """
 
     def toeplitz(c):
@@ -863,23 +861,25 @@ def psd2cov(
         j = np.arange(n).reshape(1, -1)
         return c[np.abs(i - j)]
 
-    def covmat(*args):
-        fullpsd = np.concatenate([psd, psd[-2:0:-1]])
+    # Create the full symmetric PSD (excluding duplicate Nyquist term)
+    fullpsd = np.concatenate([psd, psd[-2:0:-1]])
 
-        Cfreq = np.fft.ifft(fullpsd, norm="backward")
-        Ctau = Cfreq.real * len(fullpsd) / 2
+    # Compute the inverse FFT
+    Cfreq = np.fft.ifft(fullpsd, norm="backward")
+    Ctau = Cfreq.real * len(fullpsd) / 2
 
-        return toeplitz(Ctau[: len(t_knots)])
+    # With fmax_factor > 1, the IFFT time grid is finer by that factor.
+    # Slice out every fmax_factor-th sample to match the coarse grid.
+    return toeplitz(Ctau[::fmax_factor][: len(t_knots)])
 
-    return covmat()
 
-
-def knots_to_freqs(t_knots, oversample=3):
+def knots_to_freqs(t_knots, oversample=3, fmax_factor=1):
     """
     Convert knots of coarse time grid to frequencies
 
     :param t_knots: Timestamps of the coarse time grid
     :param oversample: amount by which to over-sample the frequency grid
+    :param fmax_factor: Integer factor to scale the maximum frequency.
 
     :return freqs: Frequencies, regularly sampled with
                    delta-f = 1/(oversample*T), fmax=1/(2*delta_t_knots)
@@ -890,9 +890,10 @@ def knots_to_freqs(t_knots, oversample=3):
     if nmodes % 2 == 0:
         raise ValueError("len(t_knots) must be odd.")
 
-    n_freqs = int((nmodes - 1) / 2 * oversample + 1)
-    fmax = (nmodes - 1) / Tspan / 2
-    return np.linspace(0, fmax, n_freqs)
+    n_freqs = int((nmodes - 1) / 2 * oversample * fmax_factor + 1)
+    fmax = (nmodes - 1) / (2 * Tspan)
+
+    return np.linspace(0, fmax * fmax_factor, n_freqs)
 
 
 # overlap reduction functions
