@@ -678,7 +678,7 @@ class FeatherPulsar:
     vector_columns = ["Mmat", "sunssb", "pos_t"]
     tensor_columns = ["planetssb"]
     # flags are done separately
-    metadata = ["name", "dm", "dmx", "pdist", "pos", "phi", "theta"]
+    metadata = ["name", "dm", "dmx", "pdist", "pos", "phi", "theta", "fitpars", "setpars", "_pdist"]
     # notes: currently ignores _isort/__isort and gets sorted versions
 
     def __init__(self):
