@@ -209,6 +209,10 @@ class LogLikelihood(object):
         # the np.sum here is needed because each pulsar returns a 2-tuple
         loglike += -0.5 * np.sum([ell for ell in self.pta.get_rNr_logdet(params)])
 
+        # Add factors of log(2pi) for the likelihood normalization
+        ntot = sum(sc._residuals.size for sc in self.pta._signalcollections)
+        loglike -= 0.5 * ntot * np.log(2 * np.pi)
+
         # get extra prior/likelihoods
         loglike += sum(self.pta.get_logsignalprior(params))
 
@@ -799,6 +803,7 @@ def SignalCollection(metasignals):  # noqa: C901
             self.white_params = []
             self.basis_params = []
             self.delay_params = []
+            self.prior_params = []
             for signal in self._signals:
                 if signal.signal_type == "white noise":
                     self.white_params.extend(signal.ndiag_params)
@@ -807,6 +812,7 @@ def SignalCollection(metasignals):  # noqa: C901
                     # for common GPs, which do not have coefficients yet
                     self.delay_params.extend(getattr(signal, "delay_params", []))
                     self.basis_params.extend(signal.basis_params)
+                    self.prior_params.extend(getattr(signal, "prior_params", []))
                 elif signal.signal_type in ["deterministic"]:
                     self.delay_params.extend(signal.delay_params)
                 else:
