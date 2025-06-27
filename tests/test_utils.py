@@ -8,7 +8,9 @@ test_utils
 Tests for `utils` module.
 """
 
+import os
 import unittest
+import pytest
 
 import numpy as np
 
@@ -18,6 +20,8 @@ from enterprise.signals import anis_coefficients as anis
 from enterprise.signals import utils
 from tests.enterprise_test_data import datadir
 
+IN_GITHUB_ACTIONS = os.getenv("GITHUB_ACTIONS") == "true"
+
 
 class TestUtils(unittest.TestCase):
     @classmethod
@@ -25,7 +29,7 @@ class TestUtils(unittest.TestCase):
         """Setup the Pulsar object."""
 
         # initialize Pulsar class
-        cls.psr = Pulsar(datadir + "/B1855+09_NANOGrav_9yv1.gls.par", datadir + "/B1855+09_NANOGrav_9yv1.tim")
+        cls.psr = Pulsar(datadir + "/B1855+09_NANOGrav_9yv1.t2.feather")
 
         cls.F, _ = utils.createfourierdesignmatrix_red(cls.psr.toas, nmodes=30)
 
@@ -128,6 +132,27 @@ class TestUtils(unittest.TestCase):
         assert U.shape == (4005, 235), msg1
         assert all(np.sum(U, axis=0) > 1), msg2
 
+        inds = utils.quant2ind(U, as_slice=False)
+        slcs = utils.quant2ind(U, as_slice=True)
+        inds_check = [utils.indices_from_slice(slc) for slc in slcs]
+
+        msg3 = "Quantization Matrix slice not equal to quantization indices"
+        for ind, ind_c in zip(inds, inds_check):
+            assert np.all(ind == ind_c), msg3
+
+    def test_indices_from_slice(self):
+        """Test conversion of slices to numpy indices"""
+        ind_np = np.array([2, 4, 6, 8])
+        ind_np_check = utils.indices_from_slice(ind_np)
+
+        msg1 = "Numpy indices not left as-is by indices_from_slice"
+        assert np.all(ind_np == ind_np_check), msg1
+
+        slc = slice(2, 10, 2)
+        ind_np_check = utils.indices_from_slice(slc)
+        msg2 = "Slice not converted properly by indices_from_slice"
+        assert np.all(ind_np == ind_np_check), msg2
+
     def test_psd(self):
         """Test PSD functions."""
         Tmax = self.psr.toas.max() - self.psr.toas.min()
@@ -145,6 +170,7 @@ class TestUtils(unittest.TestCase):
         assert np.allclose(utils.powerlaw(f, log10_A, gamma), pl), msg
         assert np.allclose(utils.turnover(f, log10_A, gamma, lf0, kappa, beta), pt), msg
 
+    @pytest.mark.skipif(IN_GITHUB_ACTIONS, reason="Test doesn't work in Github Actions due to limited memory.")
     def test_orf(self):
         """Test ORF functions."""
         p1 = np.array([0.3, 0.648, 0.7])

@@ -19,11 +19,14 @@ import enterprise
 from enterprise import constants as const
 from enterprise import signals as sigs  # noqa: F401
 from enterprise.signals.gp_bases import (  # noqa: F401
-    createfourierdesignmatrix_dm,
-    createfourierdesignmatrix_env,
-    createfourierdesignmatrix_eph,
-    createfourierdesignmatrix_ephem,
     createfourierdesignmatrix_red,
+    createfourierdesignmatrix_dm,
+    createfourierdesignmatrix_dm_tn,
+    createfourierdesignmatrix_env,
+    createfourierdesignmatrix_ephem,
+    createfourierdesignmatrix_eph,
+    createfourierdesignmatrix_chromatic,
+    createfourierdesignmatrix_general,
 )
 from enterprise.signals.gp_priors import powerlaw, turnover  # noqa: F401
 from enterprise.signals.parameter import function
@@ -32,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 class ConditionalGP:
-    def __init__(self, pta, phiinv_method="cliques"):
+    def __init__(self, pta, phiinv_method="cliques", tm_params=[], psr=None):
         """This class allows the computation of conditional means and
         random draws for all GP coefficients/realizations in a model,
         given a vector of hyperparameters. It currently requires combine=False
@@ -41,6 +44,8 @@ class ConditionalGP:
 
         self.pta = pta
         self.phiinv_method = phiinv_method
+        self.psr = psr
+        self.tm_params = tm_params
 
     def _make_conditional(self, params):
         TNrs = self.pta.get_TNr(params)
@@ -89,19 +94,32 @@ class ConditionalGP:
             pardict, ntot = {}, 0
             for i, model in enumerate(self.pta.pulsarmodels):
                 for sig in model._signals:
-                    if sig.signal_type in ["basis", "common basis"]:
-                        sb = sig.get_basis(params=params)
-                        nb = sb.shape[1]
+                    if sig.signal_type not in ["basis", "common basis"]:
+                        continue
 
-                        if nb + ntot > len(b):
-                            raise IndexError("Missing parameters! You need to set combine=False in your GPs.")
+                    sb = sig.get_basis(params=params)
+                    nb = sb.shape[1]
 
-                        if gp:
-                            pardict[sig.name] = np.dot(sb, b[ntot : nb + ntot])
-                        else:
-                            pardict[sig.name + "_coefficients"] = b[ntot : nb + ntot]
+                    if nb + ntot > len(b):
+                        raise IndexError("Missing parameters! You need to set combine=False in your GPs.")
 
-                        ntot += nb
+                    if "timing_model" in sig.name and len(self.tm_params) > 0:
+                        if self.psr is None:
+                            raise ValueError("Need to input psr to get timing model param names")
+
+                        for tm_par in self.tm_params:
+
+                            tm_idx = list(self.psr.fitpars).index(tm_par)
+                            save_name = sig.name.split("_")[0] + "_" + tm_par
+                            key = save_name if gp else f"{save_name}_coefficients"
+                            pardict[key] = np.dot(sb[:, tm_idx], b[ntot + tm_idx]) if gp else b[ntot + tm_idx]
+
+                    if gp:
+                        pardict[sig.name] = np.dot(sb, b[ntot : nb + ntot])
+                    else:
+                        pardict[sig.name + "_coefficients"] = b[ntot : nb + ntot]
+
+                    ntot += nb
 
             ret.append(pardict)
 
@@ -322,7 +340,6 @@ def create_stabletimingdesignmatrix(designmat, fastDesign=True):
 
 
 def make_ecc_interpolant():
-
     """
     Make interpolation function from eccentricity file to
     determine number of harmonics to use for a given
@@ -339,7 +356,6 @@ def make_ecc_interpolant():
 
 
 def get_edot(F, mc, e):
-
     """
     Compute eccentricity derivative from Taylor et al. (2016)
 
@@ -767,24 +783,35 @@ def create_quantization_matrix(toas, dt=1, nmin=2):
     return U, weights
 
 
-def quant2ind(U):
+def quant2ind(U, as_slice=False):
     """
-    Use quantization matrix to return slices of non-zero elements.
+    Use quantization matrix to return indices of non-zero elements.
 
     :param U: quantization matrix
+    :param as_slice: whether to return a slice object
 
-    :return: list of `slice`s for non-zero elements of U
+    :return: list of `slice`s or indices for non-zero elements of U
 
-    .. note:: This function assumes that the pulsar TOAs were sorted by time.
+    .. note:: For slice objects the TOAs need to be sorted by time
 
     """
     inds = []
     for cc, col in enumerate(U.T):
         epinds = np.flatnonzero(col)
-        if epinds[-1] - epinds[0] + 1 != len(epinds):
-            raise ValueError("ERROR: TOAs not sorted properly!")
-        inds.append(slice(epinds[0], epinds[-1] + 1))
+        if epinds[-1] - epinds[0] + 1 != len(epinds) or not as_slice:
+            inds.append(epinds)
+        else:
+            inds.append(slice(epinds[0], epinds[-1] + 1))
     return inds
+
+
+def indices_from_slice(slc):
+    """Given a slice object, return an index arrays"""
+
+    if isinstance(slc, np.ndarray):
+        return slc
+    else:
+        return np.arange(*slc.indices(slc.stop))
 
 
 def linear_interp_basis(toas, dt=30 * 86400):
@@ -863,12 +890,19 @@ def anis_orf(pos1, pos2, params, **kwargs):
 
 
 @function
-def unnormed_tm_basis(Mmat):
+def unnormed_tm_basis(Mmat, idx_exclude=None):
+    if idx_exclude:
+        idxs = np.array([i for i in range(Mmat.shape[1]) if i not in idx_exclude])
+        Mmat = Mmat[:, idxs]
     return Mmat, np.ones_like(Mmat.shape[1])
 
 
 @function
-def normed_tm_basis(Mmat, norm=None):
+def normed_tm_basis(Mmat, norm=None, idx_exclude=None):
+    if idx_exclude:
+        idxs = np.array([i for i in range(Mmat.shape[1]) if i not in idx_exclude])
+        Mmat = Mmat[:, idxs]
+
     if norm is None:
         norm = np.sqrt(np.sum(Mmat**2, axis=0))
 
@@ -879,7 +913,11 @@ def normed_tm_basis(Mmat, norm=None):
 
 
 @function
-def svd_tm_basis(Mmat):
+def svd_tm_basis(Mmat, idx_exclude=None):
+    if idx_exclude:
+        idxs = np.array([i for i in range(Mmat.shape[1]) if i not in idx_exclude])
+        Mmat = Mmat[:, idxs]
+
     u, s, v = np.linalg.svd(Mmat, full_matrices=False)
     return u, np.ones_like(s)
 
