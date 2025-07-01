@@ -1064,7 +1064,6 @@ def cache_call(attrs, limit=2):
             if key not in cache and key != () and key != {}:
                 msg = "Setting cache for {} in {}: {}".format(attrs, self.__class__, key)
                 logger.debug(msg)
-                if verbose: print(msg)
 
                 cache_list.append(key)
                 cache[key] = func(self, params)
