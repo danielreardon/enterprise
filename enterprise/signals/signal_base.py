@@ -941,10 +941,7 @@ def SignalCollection(metasignals):  # noqa: C901
             ndiags = [signal.get_ndiag(params) for signal in self._signals]
             return sum(ndiag for ndiag in ndiags if ndiag is not None)
 
-        # since this function has side-effects, it can only be cached
-        # with limit=1, so it will run again if called with params different
-        # than the last time
-        @cache_call("delay_params", limit=1)
+        @cache_call("delay_params")
         def get_delay(self, params):
             delays = [signal.get_delay(params) for signal in self._signals]
             return sum(delay for delay in delays if delay is not None)
@@ -1035,11 +1032,15 @@ def cache_call(attrs, limit=2):
 
     def cache_decorator(func):
         def wrapper(self, params={}):
-
             # get the relevant parameters to be cached
             keys = sum([getattr(self, attr) for attr in attrs], [])
             ret = []
-            ret.append(func.__name__)  # including the function name for speed improvement
+
+            ret.append(func.__name__)
+            ret.append(self.__class__.__name__)
+            for param in params:
+                ret.append(param)
+
             # TODO: this deals with vector parameters but could be cleaner...
             for key in keys:
                 if key in params:
@@ -1048,7 +1049,6 @@ def cache_call(attrs, limit=2):
                     else:
                         ret.append((key, params[key]))
             key = tuple(ret)
-            # key = tuple([(key, params[key]) for key in keys if key in params])
 
             # make sure the cache is part of the object
             if not hasattr(self, "_cache_" + func.__name__):
@@ -1061,20 +1061,32 @@ def cache_call(attrs, limit=2):
             cache = getattr(self, "_cache_" + func.__name__)
             cache_list = getattr(self, "_cache_list_" + func.__name__)
 
-            if key not in cache:
+            if key not in cache and key != () and key != {}:
                 msg = "Setting cache for {} in {}: {}".format(attrs, self.__class__, key)
                 logger.debug(msg)
+                if verbose: print(msg)
 
                 cache_list.append(key)
                 cache[key] = func(self, params)
 
                 if len(cache_list) > limit:
+                    #print("Limit reached")
                     _ = cache.pop(cache_list.pop(0), None)  # noqa: F841
-            else:
+            elif key != () and key != {}:
                 msg = "Retrieving cache for {} in {}: {}".format(attrs, self.__class__, key)
                 logger.debug(msg)
 
+                cc = cache[key]
+                if 'get_delay'in func.__name__:
+                    fr = func(self, params)
+                else:
+                    fr = cc
+
             return cache[key]
+            if key != () and key != {}:
+                return cache[key]
+            else:
+                return func(self, params)
 
         return wrapper
 
